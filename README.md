@@ -1,36 +1,50 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Meds App
 
-## Getting Started
+A simple app to track daily medication doses for pets (or people). Add patients, prescribe medications with times per day, and mark doses as given or omitted in a calendar. Built with Next.js and Supabase.
 
-First, run the development server:
+I created this app because my cat **Nilo** was sick and I needed a clear way to keep track of his medicines—when to give each pill and which doses were already given or skipped.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+---
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## How to run
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. **Clone and install**
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+   ```bash
+   git clone https://github.com/your-username/meds-app.git
+   cd meds-app
+   npm install
+   ```
 
-## Learn More
+2. **Configure Supabase**
 
-To learn more about Next.js, take a look at the following resources:
+   - Copy `.env.local.example` to `.env.local`.
+   - Add your Supabase project URL and anon key (from [Supabase](https://supabase.com) → Project Settings → API).
+   - Run the database migrations in the Supabase SQL Editor (see `supabase/migrations/`). Full setup (including Google login) is in [SUPABASE_SETUP.md](./SUPABASE_SETUP.md).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+3. **Start the app**
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+   ```bash
+   npm run dev
+   ```
 
-## Deploy on Vercel
+   Open [http://localhost:3000](http://localhost:3000). Sign in with Google, then add patients and medications.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+**Production:** `npm run build` then `npm start`.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+
+## How to use
+
+- **Patients** — Add a patient (e.g. your pet). You can add a short description (e.g. breed, nickname).
+- **Medications** — For each patient, add medications with name, start date, and how many times per day (e.g. every 12h = 2). You can set an end date when treatment finishes.
+- **Calendar** — Select a patient to see their dose calendar. Click a day cell to cycle: *empty → given (✓) → omitted (–)*. One more click on *omitted* removes the dose so the counter updates.
+- **Counters** — “Given this month” shows how many doses were given (and omitted) per medication.
+- **Export** — Use the user menu (avatar) to export all data as CSV.
+- **Theme & language** — Switch between light/dark and Spanish/English from the same menu.
+
+---
+
+## Tech
+
+- [Next.js](https://nextjs.org) (App Router), [Supabase](https://supabase.com) (auth + Postgres), [Tailwind CSS](https://tailwindcss.com).
