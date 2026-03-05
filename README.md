@@ -44,7 +44,7 @@ I created this app because my cat **Nilo** was sick and I needed a clear way to 
 - **Theme & language** — Switch between light/dark and Spanish/English from the same menu.
 - **Refresh** — The current screen and selected patient are stored in the URL, so refreshing the page keeps you where you were.
 - **Install app (PWA)** — In Chrome (desktop or Android), use “Install Meds App” or the ⊕ icon in the address bar. When opened from the home screen, the app runs in **standalone** mode (no browser bar). For best install support, add `icon-192.png` and `icon-512.png` to `public/` (e.g. export from `public/icon.svg`).
-
+- **Push notifications** — In the user menu, click "Activar notificaciones" to allow browser push. You get a reminder at 9:00 and 21:00 for pending doses. Requires VAPID keys and cron (see `.env.local.example`).
 ---
 
 ## Tech

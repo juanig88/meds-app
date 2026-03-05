@@ -3,11 +3,46 @@
 import { useState } from "react"
 import type { User } from "@supabase/supabase-js"
 import { Button } from "@/components/ui/button"
-import { LogOut, Download, ChevronDown } from "lucide-react"
+import { LogOut, Download, ChevronDown, Bell } from "lucide-react"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { LocaleToggle } from "@/components/LocaleToggle"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
+
+function urlBase64ToUint8Array(base64: string): Uint8Array {
+  const padding = "=".repeat((4 - (base64.length % 4)) % 4)
+  const raw = atob(base64.replace(/-/g, "+").replace(/_/g, "/") + padding)
+  const out = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i)
+  return out
+}
+
+async function enablePushNotifications(): Promise<{ ok: boolean; error?: string }> {
+  if (typeof window === "undefined" || !("Notification" in window) || !("serviceWorker" in navigator)) {
+    return { ok: false, error: "Not supported" }
+  }
+  const permission = await Notification.requestPermission()
+  if (permission !== "granted") return { ok: false, error: "Permission denied" }
+
+  const vapid = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
+  if (!vapid) return { ok: false, error: "VAPID not configured" }
+
+  const reg = await navigator.serviceWorker.ready
+  const sub = await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(vapid) as BufferSource,
+  })
+  const res = await fetch("/api/push/subscribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subscription: sub.toJSON() }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    return { ok: false, error: data.error || res.statusText }
+  }
+  return { ok: true }
+}
 
 function getInitials(user: User): string {
   const name = user.user_metadata?.full_name ?? user.user_metadata?.name
@@ -33,6 +68,15 @@ export function UserMenu({
 }) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
+  const [pushStatus, setPushStatus] = useState<"idle" | "loading" | "ok" | "error">("idle")
+  const canNotify = typeof window !== "undefined" && "Notification" in window && "serviceWorker" in navigator
+  const permissionGranted = canNotify && typeof Notification !== "undefined" && Notification.permission === "granted"
+
+  const handleEnableNotifications = async () => {
+    setPushStatus("loading")
+    const result = await enablePushNotifications()
+    setPushStatus(result.ok ? "ok" : "error")
+  }
 
   const displayName =
     (user.user_metadata?.full_name ?? user.user_metadata?.name) as string | undefined
@@ -99,6 +143,26 @@ export function UserMenu({
                 <Download className="h-4 w-4" />
                 {t("common.exportCsv")}
               </Button>
+              {canNotify && (
+                <div className="flex items-center justify-between gap-2 px-2 py-1">
+                  <span className="text-xs text-muted-foreground">{t("common.notifications")}</span>
+                  {permissionGranted ? (
+                    <span className="text-xs text-muted-foreground">{t("common.notificationsEnabled")}</span>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 gap-1.5 text-xs"
+                      disabled={pushStatus === "loading"}
+                      onClick={handleEnableNotifications}
+                    >
+                      <Bell className="h-3.5 w-3.5" />
+                      {pushStatus === "loading" ? "…" : pushStatus === "ok" ? t("common.notificationsEnabled") : t("common.enableNotifications")}
+                    </Button>
+                  )}
+                </div>
+              )}
               <div className="flex items-center justify-between gap-2 px-2 py-1">
                 <span className="text-xs text-muted-foreground">{t("common.theme")}</span>
                 <ThemeToggle />

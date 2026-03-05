@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
-import { Resend } from "resend"
+import webpush from "web-push"
 import { createServiceClient } from "@/lib/supabase/service"
 import { getHourForSlot } from "@/lib/notifications/dose-schedule"
 
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL ?? "Meds App <onboarding@resend.dev>"
 const TIMEZONE = process.env.NOTIFY_TIMEZONE ?? "America/Argentina/Buenos_Aires"
 
-type DbUser = { id: string; email: string | null }
+type DbUser = { id: string }
 type DbPatient = { id: string; user_id: string; name: string }
 type DbMedication = {
   id: string
@@ -17,6 +16,7 @@ type DbMedication = {
   end_date: string | null
 }
 type DbDose = { patient_id: string; medication_id: string; slot_index: number; date: string }
+type DbPushSub = { user_id: string; endpoint: string; p256dh: string; auth: string }
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization")
@@ -25,15 +25,21 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const apiKey = process.env.RESEND_API_KEY
-  if (!apiKey) {
+  const publicKey = process.env.VAPID_PUBLIC_KEY
+  const privateKey = process.env.VAPID_PRIVATE_KEY
+  if (!publicKey || !privateKey) {
     return NextResponse.json(
-      { error: "RESEND_API_KEY not set" },
+      { error: "VAPID_PUBLIC_KEY or VAPID_PRIVATE_KEY not set" },
       { status: 500 }
     )
   }
 
-  const resend = new Resend(apiKey)
+  webpush.setVapidDetails(
+    "mailto:meds-app@localhost",
+    publicKey,
+    privateKey
+  )
+
   const now = new Date()
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: TIMEZONE,
@@ -47,11 +53,13 @@ export async function GET(request: NextRequest) {
   const hour = parseInt(getPart("hour"), 10)
   const today = `${getPart("year")}-${getPart("month")}-${getPart("day")}`
 
+  if (hour !== 9 && hour !== 21) {
+    return NextResponse.json({ ok: true, sent: 0, message: "Not a reminder hour (9 or 21)" })
+  }
+
   const supabase = createServiceClient()
 
-  const { data: users, error: usersError } = await supabase
-    .from("users")
-    .select("id, email")
+  const { data: users, error: usersError } = await supabase.from("users").select("id")
   if (usersError || !users?.length) {
     return NextResponse.json(
       { error: "Failed to fetch users", detail: usersError?.message },
@@ -59,11 +67,7 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  const userIds = (users as DbUser[]).filter((u) => u.email).map((u) => u.id)
-  if (userIds.length === 0) {
-    return NextResponse.json({ ok: true, sent: 0, message: "No users with email" })
-  }
-
+  const userIds = (users as DbUser[]).map((u) => u.id)
   const { data: patients, error: patientsError } = await supabase
     .from("patients")
     .select("id, user_id, name")
@@ -75,7 +79,6 @@ export async function GET(request: NextRequest) {
     )
   }
   const patientList = (patients ?? []) as DbPatient[]
-
   const patientIds = patientList.map((p) => p.id)
   if (patientIds.length === 0) {
     return NextResponse.json({ ok: true, sent: 0, message: "No patients" })
@@ -92,7 +95,6 @@ export async function GET(request: NextRequest) {
     )
   }
   const medList = (medications ?? []) as DbMedication[]
-
   const activeMeds = medList.filter((m) => {
     if (m.start_date > today) return false
     if (m.end_date != null && m.end_date < today) return false
@@ -119,7 +121,6 @@ export async function GET(request: NextRequest) {
   type Reminder = { patientName: string; medicationName: string }
   const byUser = new Map<string, Reminder[]>()
   for (const u of users as DbUser[]) {
-    if (!u.email) continue
     byUser.set(u.id, [])
   }
 
@@ -144,35 +145,46 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  let sent = 0
+  const { data: subs, error: subsError } = await supabase
+    .from("push_subscriptions")
+    .select("user_id, endpoint, p256dh, auth")
+  if (subsError) {
+    return NextResponse.json(
+      { error: "Failed to fetch push subscriptions", detail: subsError?.message },
+      { status: 500 }
+    )
+  }
+  const subscriptionList = (subs ?? []) as DbPushSub[]
+
   const appName = process.env.NEXT_PUBLIC_APP_NAME ?? "Meds App"
-  for (const u of users as DbUser[]) {
-    if (!u.email) continue
-    const reminders = byUser.get(u.id) ?? []
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://localhost:3000"
+  let sent = 0
+  for (const sub of subscriptionList) {
+    const reminders = byUser.get(sub.user_id) ?? []
     if (reminders.length === 0) continue
 
-    const list = reminders
-      .map(
-        (r) =>
-          `• ${r.medicationName} — ${r.patientName}`
-      )
+    const body = reminders
+      .map((r) => `${r.medicationName} — ${r.patientName}`)
       .join("\n")
-    const { error } = await resend.emails.send({
-      from: FROM_EMAIL,
-      to: [u.email],
-      subject: `${appName} — Recordatorio: ${reminders.length} dosis pendiente(s) hoy`,
-      html: `
-        <p>Hola,</p>
-        <p>Te recordamos dar las siguientes dosis:</p>
-        <pre style="font-family:sans-serif; white-space:pre-wrap;">${list}</pre>
-        <p><a href="${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}">Abrir Meds App</a></p>
-      `,
+    const payload = JSON.stringify({
+      title: `${appName} — Recordatorio`,
+      body: body.slice(0, 200) + (body.length > 200 ? "…" : ""),
+      url: appUrl,
     })
-    if (error) {
-      console.error("[cron/notify] Resend error for", u.email, error)
-      continue
+
+    try {
+      await webpush.sendNotification(
+        {
+          endpoint: sub.endpoint,
+          keys: { p256dh: sub.p256dh, auth: sub.auth },
+        },
+        payload,
+        { TTL: 3600 }
+      )
+      sent++
+    } catch (err) {
+      console.error("[cron/notify] web-push error for", sub.endpoint.slice(0, 50), err)
     }
-    sent++
   }
 
   return NextResponse.json({
@@ -180,9 +192,5 @@ export async function GET(request: NextRequest) {
     sent,
     hour,
     today,
-    reminders: Array.from(byUser.entries()).reduce(
-      (acc, [id, list]) => ({ ...acc, [id]: list.length }),
-      {} as Record<string, number>
-    ),
   })
 }
