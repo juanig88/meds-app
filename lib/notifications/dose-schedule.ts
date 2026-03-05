@@ -1,9 +1,9 @@
-/** Horarios fijos de recordatorio push: 9:00 y 21:00. */
-const HOUR_MORNING = 9
-const HOUR_EVENING = 21
+/** Slots: mañana = primera dosis (0), noche = última dosis del día. */
 
-export function getHourForSlot(timesPerDay: number, slotIndex: number): number {
-  if (slotIndex === 0) return HOUR_MORNING
-  if (timesPerDay > 1 && slotIndex === timesPerDay - 1) return HOUR_EVENING
-  return -1
+export function isMorningSlot(timesPerDay: number, slotIndex: number): boolean {
+  return slotIndex === 0
+}
+
+export function isEveningSlot(timesPerDay: number, slotIndex: number): boolean {
+  return timesPerDay > 1 && slotIndex === timesPerDay - 1
 }

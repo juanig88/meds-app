@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import webpush from "web-push"
 import { createServiceClient } from "@/lib/supabase/service"
-import { getHourForSlot } from "@/lib/notifications/dose-schedule"
+import { isMorningSlot, isEveningSlot } from "@/lib/notifications/dose-schedule"
 
 const TIMEZONE = process.env.NOTIFY_TIMEZONE ?? "America/Argentina/Buenos_Aires"
 
@@ -43,19 +43,13 @@ export async function GET(request: NextRequest) {
   const now = new Date()
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: TIMEZONE,
-    hour: "numeric",
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
   })
   const parts = formatter.formatToParts(now)
   const getPart = (type: string) => parts.find((p) => p.type === type)?.value ?? "0"
-  const hour = parseInt(getPart("hour"), 10)
   const today = `${getPart("year")}-${getPart("month")}-${getPart("day")}`
-
-  if (hour !== 9 && hour !== 21) {
-    return NextResponse.json({ ok: true, sent: 0, message: "Not a reminder hour (9 or 21)" })
-  }
 
   const supabase = createServiceClient()
 
@@ -119,29 +113,27 @@ export async function GET(request: NextRequest) {
   )
 
   type Reminder = { patientName: string; medicationName: string }
-  const byUser = new Map<string, Reminder[]>()
+  const morningByUser = new Map<string, Reminder[]>()
+  const eveningByUser = new Map<string, Reminder[]>()
   for (const u of users as DbUser[]) {
-    byUser.set(u.id, [])
+    morningByUser.set(u.id, [])
+    eveningByUser.set(u.id, [])
   }
 
   for (const med of activeMeds) {
     const patient = patientList.find((p) => p.id === med.patient_id)
     if (!patient) continue
     const userId = patient.user_id
-    if (!byUser.has(userId)) continue
 
     for (let slot = 0; slot < med.times_per_day; slot++) {
-      const slotHour = getHourForSlot(med.times_per_day, slot)
-      if (slotHour !== hour) continue
       const key = `${med.patient_id}|${med.id}|${slot}`
       if (givenOrOmitted.has(key)) continue
 
       const slotLabel =
         med.times_per_day > 1 ? ` (${slot + 1}/${med.times_per_day})` : ""
-      byUser.get(userId)!.push({
-        patientName: patient.name,
-        medicationName: med.name + slotLabel,
-      })
+      const item: Reminder = { patientName: patient.name, medicationName: med.name + slotLabel }
+      if (isMorningSlot(med.times_per_day, slot)) morningByUser.get(userId)!.push(item)
+      if (isEveningSlot(med.times_per_day, slot)) eveningByUser.get(userId)!.push(item)
     }
   }
 
@@ -160,14 +152,20 @@ export async function GET(request: NextRequest) {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://localhost:3000"
   let sent = 0
   for (const sub of subscriptionList) {
-    const reminders = byUser.get(sub.user_id) ?? []
-    if (reminders.length === 0) continue
+    const morning = morningByUser.get(sub.user_id) ?? []
+    const evening = eveningByUser.get(sub.user_id) ?? []
+    if (morning.length === 0 && evening.length === 0) continue
 
-    const body = reminders
-      .map((r) => `${r.medicationName} — ${r.patientName}`)
-      .join("\n")
+    const parts: string[] = []
+    if (morning.length > 0) {
+      parts.push("Mañana: " + morning.map((r) => `${r.medicationName} — ${r.patientName}`).join(", "))
+    }
+    if (evening.length > 0) {
+      parts.push("Noche: " + evening.map((r) => `${r.medicationName} — ${r.patientName}`).join(", "))
+    }
+    const body = parts.join(". ")
     const payload = JSON.stringify({
-      title: `${appName} — Recordatorio`,
+      title: `${appName} — Recordatorio del día`,
       body: body.slice(0, 200) + (body.length > 200 ? "…" : ""),
       url: appUrl,
     })
@@ -190,7 +188,6 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     ok: true,
     sent,
-    hour,
     today,
   })
 }
