@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { Suspense, useState, useEffect, useRef } from "react"
+import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { HomeScreen } from "@/components/HomeScreen"
 
 import { PatientsScreen } from "@/meds-tracker/components/PatientsScreen"
@@ -14,15 +15,78 @@ import { UserMenu } from "@/components/UserMenu"
 import { exportAllToCsv } from "@/lib/export-csv"
 
 const LOG_PREFIX = "[meds-page]"
+const VALID_VIEWS: MedsNavScreen[] = ["home", "patients", "calendar"]
+
+function PageFallback() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <p className="text-muted-foreground">Cargando...</p>
+    </div>
+  )
+}
 
 export default function MedsPage({
   searchParams,
 }: {
   searchParams: Promise<{ error?: string }> | { error?: string }
 }) {
+  return (
+    <Suspense fallback={<PageFallback />}>
+      <MedsPageContent searchParams={searchParams} />
+    </Suspense>
+  )
+}
+
+function MedsPageContent({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }> | { error?: string }
+}) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParamsClient = useSearchParams()
+
+  const viewFromUrl = (() => {
+    const v = searchParamsClient.get("view")
+    return v && VALID_VIEWS.includes(v as MedsNavScreen) ? (v as MedsNavScreen) : "patients"
+  })()
+  const patientFromUrl = (() => {
+    const p = searchParamsClient.get("patient")
+    return p && /^[0-9a-f-]{36}$/i.test(p) ? p : null
+  })()
+
   const [authError, setAuthError] = useState<string | null>(null)
-  const [view, setView] = useState<MedsNavScreen>("patients")
-  const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null)
+  const [view, setViewState] = useState<MedsNavScreen>(() => viewFromUrl)
+  const [selectedPatientId, setSelectedPatientIdState] = useState<string | null>(() => patientFromUrl)
+  const urlSyncedRef = useRef(false)
+
+  // When URL has no view param, write it once so refresh keeps place (no setState here)
+  useEffect(() => {
+    if (urlSyncedRef.current) return
+    if (searchParamsClient.get("view")) return
+    urlSyncedRef.current = true
+    const params = new URLSearchParams()
+    params.set("view", viewFromUrl)
+    if (viewFromUrl === "calendar" && patientFromUrl) params.set("patient", patientFromUrl)
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+  }, [searchParamsClient, pathname, router, viewFromUrl, patientFromUrl])
+
+  const setView = (newView: MedsNavScreen) => {
+    setViewState(newView)
+    const params = new URLSearchParams(searchParamsClient.toString())
+    params.set("view", newView)
+    if (newView !== "calendar") params.delete("patient")
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+  }
+  const setSelectedPatientId = (id: string | null) => {
+    setSelectedPatientIdState(id)
+    setViewState("calendar")
+    const params = new URLSearchParams(searchParamsClient.toString())
+    params.set("view", "calendar")
+    if (id) params.set("patient", id)
+    else params.delete("patient")
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+  }
 
   const { user, loading, configMissing, signInWithGoogle, signOut } = useAuth()
 
@@ -72,7 +136,6 @@ export default function MedsPage({
   const handleSelectPatient = (patient: Patient) => {
     console.log(LOG_PREFIX, "clic en paciente →", patient.name, "| id:", patient.id)
     setSelectedPatientId(patient.id)
-    setView("calendar")
   }
 
   if (configMissing) {
