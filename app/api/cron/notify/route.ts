@@ -158,15 +158,15 @@ export async function GET(request: NextRequest) {
 
     const parts: string[] = []
     if (morning.length > 0) {
-      parts.push("Mañana: " + morning.map((r) => `${r.medicationName} — ${r.patientName}`).join(", "))
+      parts.push("9:00 Mañana: " + morning.map((r) => `${r.medicationName} (${r.patientName})`).join(", "))
     }
     if (evening.length > 0) {
-      parts.push("Noche: " + evening.map((r) => `${r.medicationName} — ${r.patientName}`).join(", "))
+      parts.push("21:00 Noche: " + evening.map((r) => `${r.medicationName} (${r.patientName})`).join(", "))
     }
     const body = parts.join(". ")
     const payload = JSON.stringify({
-      title: `${appName} — Recordatorio del día`,
-      body: body.slice(0, 200) + (body.length > 200 ? "…" : ""),
+      title: "Dosis pendientes hoy",
+      body: body.slice(0, 250) + (body.length > 250 ? "…" : ""),
       url: appUrl,
     })
 

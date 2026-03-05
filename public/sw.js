@@ -14,7 +14,8 @@ self.addEventListener("push", (event) => {
     self.registration.showNotification(data.title, {
       body: data.body,
       icon: "/icon.svg",
-      tag: "meds-reminder",
+      tag: "meds-dosis-hoy",
+      requireInteraction: false,
       data: { url: data.url || "/" },
     })
   )
